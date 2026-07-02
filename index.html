@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="EREGEPIA - Juego de Rol de texto estilo D&D 5e con interfaz de terminal">
+    <title>EREGEPIA — RPG de Texto</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/terminal.css">
+</head>
+<body>
+    <div id="crt-overlay"></div>
+    <div id="game-container">
+        <!-- Panel izquierdo: Terminal -->
+        <div id="terminal-panel">
+            <div id="terminal-header">
+                <span class="header-dot red"></span>
+                <span class="header-dot yellow"></span>
+                <span class="header-dot green"></span>
+                <span class="header-title">EREGEPIA v1.0 — Terminal</span>
+            </div>
+            <div id="terminal-output"></div>
+            <div id="terminal-input-area">
+                <span id="terminal-prompt">&gt; </span>
+                <input type="text" id="terminal-input" autofocus autocomplete="off" spellcheck="false">
+                <span id="cursor-blink">█</span>
+            </div>
+        </div>
+        <!-- Panel derecho: Mapa + Info -->
+        <div id="map-panel">
+            <div id="map-header">
+                <span class="header-title">🗺️ MAPA</span>
+            </div>
+            <div id="map-display">
+                <pre id="map-ascii"></pre>
+            </div>
+            <div id="map-legend"></div>
+            <div id="chat-panel">
+                <div id="chat-header">
+                    <span class="header-title">💬 CHAT</span>
+                </div>
+                <div id="chat-messages"></div>
+            </div>
+            <div id="map-info"></div>
+        </div>
+    </div>
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
