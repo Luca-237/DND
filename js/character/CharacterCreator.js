@@ -22,44 +22,59 @@ export class CharacterCreator {
      * @returns {Promise<Character>}
      */
     async start() {
-        this.terminal.clear();
-        this._showCreationBanner();
+        let step = 1;
+        while (step <= 9) {
+            this.terminal.clear();
+            this._showCreationBanner();
 
-        // Paso 1: Nombre
-        await this._stepName();
+            // Set map portrait image
+            const mapDisplay = document.getElementById('map-display');
+            if (mapDisplay) {
+                const raceId = this.character.raceId || 'human';
+                const classId = this.character.classId || 'fighter';
+                mapDisplay.innerHTML = `<img src="img/portraits/${raceId}_${classId}.png" alt="Personaje" style="width:100%; height:100%; object-fit:contain;" />`;
+            }
 
-        // Paso 2: Especie (Raza)
-        await this._stepRace();
+            let result = 1;
+            switch(step) {
+                case 1: result = await this._stepName(); break;
+                case 2: result = await this._stepRace(); break;
+                case 3: result = await this._stepClass(); break;
+                case 4: result = await this._stepBackground(); break;
+                case 5: result = await this._stepAbilityScores(); break;
+                case 6: result = await this._stepSkills(); break;
+                case 7: 
+                    if (this.character.spellcastingAbility) {
+                        result = await this._stepSpells(); 
+                    }
+                    break;
+                case 8: 
+                    const classData = getClassById(this.character.classId);
+                    if (classData && classData.fightingStyles) {
+                        result = await this._stepFightingStyle(classData); 
+                    }
+                    break;
+                case 9:
+                    this._finalizeCharacter();
+                    result = await this._stepSummary();
+                    if (result === 'restart') {
+                        this.character = new Character();
+                        step = 1;
+                        continue; // Evita el incremento de step
+                    }
+                    break;
+            }
 
-        // Paso 3: Clase
-        await this._stepClass();
-
-        // Paso 4: Trasfondo
-        await this._stepBackground();
-
-        // Paso 5: Ability Scores
-        await this._stepAbilityScores();
-
-        // Paso 6: Habilidades (Skills)
-        await this._stepSkills();
-
-        // Paso 7: Hechizos (si aplica)
-        if (this.character.spellcastingAbility) {
-            await this._stepSpells();
+            if (result === -1) {
+                step--;
+                if (step < 1) step = 1;
+            } else {
+                step++;
+            }
         }
 
-        // Paso 8: Estilo de combate (si aplica)
-        const classData = getClassById(this.character.classId);
-        if (classData.fightingStyles) {
-            await this._stepFightingStyle(classData);
-        }
-
-        // Finalizar
-        this._finalizeCharacter();
-
-        // Paso 9: Resumen
-        await this._stepSummary();
-
+        // Save to localStorage
+        localStorage.setItem('eregepeia_character', JSON.stringify(this.character));
         return this.character;
     }
 
@@ -76,7 +91,7 @@ export class CharacterCreator {
     async _stepName() {
         this.terminal.writeSystem('PASO 1/8 — NOMBRE DEL PERSONAJE');
         this.terminal.writeDivider();
-        this.terminal.writeNarrative('¿Cómo se llama tu personaje?');
+        this.terminal.writeNarrative('¿Cómo se llama tu personaje? (No se puede volver atrás desde aquí)');
         this.terminal.writeBlank();
 
         while (true) {
@@ -85,7 +100,7 @@ export class CharacterCreator {
                 this.character.name = name;
                 this.terminal.writeSuccess(`Tu personaje se llamará: ${name}`);
                 this.terminal.writeBlank();
-                return;
+                return 1;
             }
             this.terminal.writeError('El nombre debe tener entre 2 y 30 caracteres.');
         }
@@ -98,12 +113,14 @@ export class CharacterCreator {
         this.terminal.writeNarrative('Elige la especie de tu personaje:');
         this.terminal.writeBlank();
 
+        this.terminal.writeOption(0, 'Volver atrás');
         RACES.forEach((race, i) => {
             this.terminal.writeOption(i + 1, `${race.name} — ${race.description}`);
         });
         this.terminal.writeBlank();
 
-        const choice = await this.terminal.waitForChoice(1, RACES.length);
+        const choice = await this.terminal.waitForChoice(0, RACES.length);
+        if (choice === 0) return -1;
         const race = RACES[choice - 1];
 
         this.character.raceId = race.id;
@@ -139,10 +156,12 @@ export class CharacterCreator {
         if (race.subTypes && race.subTypes.length > 0) {
             this.terminal.writeBlank();
             this.terminal.writeNarrative('Elige tu linaje:');
+            this.terminal.writeOption(0, 'Volver atrás');
             race.subTypes.forEach((sub, i) => {
                 this.terminal.writeOption(i + 1, `${sub.name} — ${sub.desc}`);
             });
-            const subChoice = await this.terminal.waitForChoice(1, race.subTypes.length);
+            const subChoice = await this.terminal.waitForChoice(0, race.subTypes.length);
+            if (subChoice === 0) return -1;
             this.character.raceSubType = race.subTypes[subChoice - 1];
             this.terminal.writeSuccess(`Linaje: ${this.character.raceSubType.name}`);
 
@@ -153,6 +172,7 @@ export class CharacterCreator {
         }
 
         this.terminal.writeBlank();
+        return 1;
     }
 
     // ── PASO 3: CLASE ────────────────────────────
@@ -162,13 +182,15 @@ export class CharacterCreator {
         this.terminal.writeNarrative('Elige la clase de tu personaje:');
         this.terminal.writeBlank();
 
+        this.terminal.writeOption(0, 'Volver atrás');
         CLASSES.forEach((cls, i) => {
             const spellIcon = cls.spellcaster ? '✦' : '⚔';
             this.terminal.writeOption(i + 1, `${spellIcon} ${cls.name} (d${cls.hitDie}) — ${cls.description}`);
         });
         this.terminal.writeBlank();
 
-        const choice = await this.terminal.waitForChoice(1, CLASSES.length);
+        const choice = await this.terminal.waitForChoice(0, CLASSES.length);
+        if (choice === 0) return -1;
         const cls = CLASSES[choice - 1];
 
         this.character.classId = cls.id;
@@ -208,6 +230,7 @@ export class CharacterCreator {
         });
 
         this.terminal.writeBlank();
+        return 1;
     }
 
     // ── PASO 4: TRASFONDO ────────────────────────
@@ -218,6 +241,7 @@ export class CharacterCreator {
         this.terminal.writeNarrative('En D&D 2024, el trasfondo también determina tus bonificadores de característica (+2/+1).');
         this.terminal.writeBlank();
 
+        this.terminal.writeOption(0, 'Volver atrás');
         BACKGROUNDS.forEach((bg, i) => {
             const feat = getFeatById(bg.originFeat);
             const featName = feat ? feat.name : bg.originFeat;
@@ -225,7 +249,8 @@ export class CharacterCreator {
         });
         this.terminal.writeBlank();
 
-        const choice = await this.terminal.waitForChoice(1, BACKGROUNDS.length);
+        const choice = await this.terminal.waitForChoice(0, BACKGROUNDS.length);
+        if (choice === 0) return -1;
         const bg = BACKGROUNDS[choice - 1];
 
         this.character.backgroundId = bg.id;
@@ -268,6 +293,7 @@ export class CharacterCreator {
             });
         }
         this.terminal.writeBlank();
+        return 1;
     }
 
     // ── PASO 5: ABILITY SCORES ──────────────────
@@ -276,11 +302,13 @@ export class CharacterCreator {
         this.terminal.writeDivider();
         this.terminal.writeNarrative('Elige cómo asignar tus puntuaciones de característica:');
         this.terminal.writeBlank();
+        this.terminal.writeOption(0, 'Volver atrás');
         this.terminal.writeOption(1, 'Array Estándar [15, 14, 13, 12, 10, 8] — Equilibrado y rápido');
         this.terminal.writeOption(2, 'Point Buy (27 puntos) — Personalización total');
         this.terminal.writeBlank();
 
-        const method = await this.terminal.waitForChoice(1, 2);
+        const method = await this.terminal.waitForChoice(0, 2);
+        if (method === 0) return -1;
 
         if (method === 1) {
             await this._assignStandardArray();
@@ -296,6 +324,8 @@ export class CharacterCreator {
         this.terminal.writeSuccess('Puntuaciones finales (con bonificadores de trasfondo):');
         this._displayAbilityScores();
         this.terminal.writeBlank();
+        
+        return 1;
     }
 
     async _assignStandardArray() {
@@ -444,12 +474,14 @@ export class CharacterCreator {
             const remaining = choosable.filter(s => !chosen.includes(s));
             if (remaining.length === 0) break;
 
+            this.terminal.writeOption(0, 'Volver atrás');
             remaining.forEach((skill, j) => {
                 this.terminal.writeOption(j + 1, skill);
             });
             this.terminal.writeBlank();
 
-            const choice = await this.terminal.waitForChoice(1, remaining.length);
+            const choice = await this.terminal.waitForChoice(0, remaining.length);
+            if (choice === 0) return -1;
             const skill = remaining[choice - 1];
             chosen.push(skill);
             this.character.skillProficiencies.push(skill);
@@ -457,6 +489,7 @@ export class CharacterCreator {
         }
 
         this.terminal.writeBlank();
+        return 1;
     }
 
     // ── PASO 7: HECHIZOS ────────────────────────
@@ -477,12 +510,14 @@ export class CharacterCreator {
             const chosenCantrips = [];
             for (let i = 0; i < cls.cantripsKnown; i++) {
                 const available = cantrips.filter(s => !chosenCantrips.includes(s.id));
+                this.terminal.writeOption(0, 'Volver atrás');
                 available.forEach((spell, j) => {
                     this.terminal.writeOption(j + 1, `${spell.name} — ${spell.description}`);
                 });
                 this.terminal.writeBlank();
 
-                const choice = await this.terminal.waitForChoice(1, available.length);
+                const choice = await this.terminal.waitForChoice(0, available.length);
+                if (choice === 0) return -1;
                 const spell = available[choice - 1];
                 chosenCantrips.push(spell.id);
                 this.character.knownCantrips.push(spell);
@@ -505,12 +540,14 @@ export class CharacterCreator {
                 const available = spells.filter(s => !chosenSpells.includes(s.id));
                 if (available.length === 0) break;
 
+                this.terminal.writeOption(0, 'Volver atrás');
                 available.forEach((spell, j) => {
                     this.terminal.writeOption(j + 1, `${spell.name} [${spell.school}] — ${spell.description}`);
                 });
                 this.terminal.writeBlank();
 
-                const choice = await this.terminal.waitForChoice(1, available.length);
+                const choice = await this.terminal.waitForChoice(0, available.length);
+                if (choice === 0) return -1;
                 const spell = available[choice - 1];
                 chosenSpells.push(spell.id);
                 this.character.knownSpells.push(spell);
@@ -527,6 +564,7 @@ export class CharacterCreator {
                 this.terminal.writeSuccess('Cantrip gratuito: Rayo Místico');
             }
         }
+        return 1;
     }
 
     // ── PASO 8: ESTILO DE COMBATE ───────────────
@@ -536,15 +574,18 @@ export class CharacterCreator {
         this.terminal.writeNarrative('Elige un estilo de combate:');
         this.terminal.writeBlank();
 
+        this.terminal.writeOption(0, 'Volver atrás');
         classData.fightingStyles.forEach((style, i) => {
             this.terminal.writeOption(i + 1, `${style.name} — ${style.desc}`);
         });
         this.terminal.writeBlank();
 
-        const choice = await this.terminal.waitForChoice(1, classData.fightingStyles.length);
+        const choice = await this.terminal.waitForChoice(0, classData.fightingStyles.length);
+        if (choice === 0) return -1;
         this.character.fightingStyle = classData.fightingStyles[choice - 1];
         this.terminal.writeSuccess(`Estilo de combate: ${this.character.fightingStyle.name}`);
         this.terminal.writeBlank();
+        return 1;
     }
 
     // ── FINALIZACIÓN ─────────────────────────────
@@ -681,8 +722,8 @@ export class CharacterCreator {
 
         const confirm = await this.terminal.waitForChoice(1, 2);
         if (confirm === 2) {
-            this.character = new Character();
-            return this.start();
+            return 'restart';
         }
+        return 1;
     }
 }

@@ -11,6 +11,8 @@ import { CharacterCreator } from '../character/CharacterCreator.js';
 import { getScenario } from '../world/scenarios.js';
 import { formatModifier, SKILLS } from '../character/AbilityScores.js';
 import { getEquipmentById } from '../data/equipment.js';
+import { getSpellById } from '../data/spells.js';
+import { Character } from '../character/Character.js';
 
 export class GameEngine {
     constructor() {
@@ -30,11 +32,48 @@ export class GameEngine {
         this._showTitle();
         await this._waitForStart();
 
-        // Creación de personaje
-        this.state.setPhase(GAME_PHASES.CHARACTER_CREATION);
-        const creator = new CharacterCreator(this.terminal, this.events);
-        const character = await creator.start();
-        this.state.character = character;
+        // Comprobar localStorage
+        const savedData = localStorage.getItem('eregepeia_character');
+        let useSaved = false;
+
+        if (savedData) {
+            try {
+                const parsed = JSON.parse(savedData);
+                this.terminal.writeBlank();
+                this.terminal.writeSystem(`Personaje guardado encontrado: ${parsed.name} (${parsed.className} Nivel ${parsed.level})`);
+                this.terminal.writeOption(1, `Continuar aventura con ${parsed.name}`);
+                this.terminal.writeOption(2, 'Crear un nuevo personaje');
+                this.terminal.writeBlank();
+                
+                const choice = await this.terminal.waitForChoice(1, 2);
+                if (choice === 1) {
+                    useSaved = true;
+                    const charObj = new Character();
+                    Object.assign(charObj, parsed);
+                    this.state.character = charObj;
+                } else {
+                    localStorage.removeItem('eregepeia_character');
+                }
+            } catch (e) {
+                console.error("Error al cargar personaje", e);
+                localStorage.removeItem('eregepeia_character');
+            }
+        }
+
+        if (!useSaved) {
+            // Creación de personaje
+            this.state.setPhase(GAME_PHASES.CHARACTER_CREATION);
+            const creator = new CharacterCreator(this.terminal, this.events);
+            const character = await creator.start();
+            this.state.character = character;
+        }
+
+        // Restaurar mapa por si venimos de la creación de personaje
+        const mapDisplay = document.getElementById('map-display');
+        if (mapDisplay && !useSaved) {
+            mapDisplay.innerHTML = '<pre id="map-ascii"></pre>';
+            this.map.mapEl = document.getElementById('map-ascii');
+        }
 
         // Iniciar exploración
         await this._startExploration('tavern');
@@ -327,49 +366,116 @@ export class GameEngine {
     // ── HECHIZOS ─────────────────────────────────
     async _showSpells() {
         const char = this.state.character;
-        this.terminal.writeBlank();
-        this.terminal.writeTitle('📖 LIBRO DE HECHIZOS');
-        this.terminal.writeDivider('─', 35);
+        let viewing = true;
 
-        if (!char.spellcastingAbility) {
-            this.terminal.writeNarrative('Tu clase no posee habilidades mágicas.');
+        while (viewing) {
             this.terminal.writeBlank();
-            return;
-        }
+            this.terminal.writeTitle('📖 LIBRO DE HECHIZOS');
+            this.terminal.writeDivider('─', 35);
 
-        this.terminal.writeLine(`<span class="text-cyan">Aptitud Mágica:</span> <span class="text-yellow">${char.spellcastingAbility}</span>`);
-        this.terminal.writeLine(`<span class="text-cyan">Ataque Mágico:</span> <span class="text-yellow">+${char.spellAttackBonus}</span>  |  <span class="text-cyan">CD:</span> <span class="text-yellow">${char.spellSaveDC}</span>`);
+            if (!char.spellcastingAbility) {
+                this.terminal.writeNarrative('Tu clase no posee habilidades mágicas.');
+                this.terminal.writeBlank();
+                return;
+            }
 
-        // Spell slots
-        if (char.spellSlots[1]) {
-            const current = char.currentSpellSlots[1] || 0;
-            const max = char.spellSlots[1];
-            this.terminal.writeLine(`<span class="text-cyan">Espacios Nv1:</span> <span class="text-yellow">${'◆'.repeat(current)}${'◇'.repeat(max - current)}</span> (${current}/${max})`);
-        }
+            this.terminal.writeLine(`<span class="text-cyan">Aptitud Mágica:</span> <span class="text-yellow">${char.spellcastingAbility}</span>`);
+            this.terminal.writeLine(`<span class="text-cyan">Ataque Mágico:</span> <span class="text-yellow">+${char.spellAttackBonus}</span>  |  <span class="text-cyan">CD:</span> <span class="text-yellow">${char.spellSaveDC}</span>`);
 
-        // Cantrips
-        if (char.knownCantrips.length > 0) {
+            // Spell slots
+            let currentSlots = 0;
+            if (char.spellSlots[1]) {
+                currentSlots = char.currentSpellSlots[1] || 0;
+                const max = char.spellSlots[1];
+                this.terminal.writeLine(`<span class="text-cyan">Espacios Nv1:</span> <span class="text-yellow">${'◆'.repeat(currentSlots)}${'◇'.repeat(max - currentSlots)}</span> (${currentSlots}/${max})`);
+            }
+
+            let allSpells = [];
+
+            // Cantrips
+            if (char.knownCantrips.length > 0) {
+                this.terminal.writeBlank();
+                this.terminal.writeLine('<span class="text-magenta">── Cantrips (A voluntad) ──</span>');
+                char.knownCantrips.forEach((spell) => {
+                    allSpells.push(spell);
+                    this.terminal.writeLine(`  <span class="text-yellow">${allSpells.length}.</span> <span class="text-white">${spell.name}</span> <span class="text-dim">[${spell.school}]</span>`);
+                    this.terminal.writeLine(`     <span class="text-dim">${spell.castTime} | ${spell.range} | ${spell.duration}</span>`);
+                    this.terminal.writeLine(`     <span class="text-dim">${spell.description}</span>`);
+                });
+            }
+
+            // Level 1 spells
+            if (char.knownSpells.length > 0) {
+                this.terminal.writeBlank();
+                this.terminal.writeLine('<span class="text-magenta">── Nivel 1 ──</span>');
+                char.knownSpells.forEach((spell) => {
+                    allSpells.push(spell);
+                    this.terminal.writeLine(`  <span class="text-yellow">${allSpells.length}.</span> <span class="text-white">${spell.name}</span> <span class="text-dim">[${spell.school}]</span>`);
+                    this.terminal.writeLine(`     <span class="text-dim">${spell.castTime} | ${spell.range} | ${spell.duration}</span>`);
+                    this.terminal.writeLine(`     <span class="text-dim">${spell.description}</span>`);
+                });
+            }
+
             this.terminal.writeBlank();
-            this.terminal.writeLine('<span class="text-magenta">── Cantrips (A voluntad) ──</span>');
-            char.knownCantrips.forEach((spell, i) => {
-                this.terminal.writeLine(`  <span class="text-yellow">${i + 1}.</span> <span class="text-white">${spell.name}</span> <span class="text-dim">[${spell.school}]</span>`);
-                this.terminal.writeLine(`     <span class="text-dim">${spell.castTime} | ${spell.range} | ${spell.duration}</span>`);
-                this.terminal.writeLine(`     <span class="text-dim">${spell.description}</span>`);
-            });
-        }
+            
+            if (allSpells.length === 0) {
+                this.terminal.writeOption(1, 'Volver');
+                await this.terminal.waitForChoice(1, 1);
+                viewing = false;
+                break;
+            }
 
-        // Level 1 spells
-        if (char.knownSpells.length > 0) {
-            this.terminal.writeBlank();
-            this.terminal.writeLine('<span class="text-magenta">── Nivel 1 ──</span>');
-            char.knownSpells.forEach((spell, i) => {
-                this.terminal.writeLine(`  <span class="text-yellow">${i + 1}.</span> <span class="text-white">${spell.name}</span> <span class="text-dim">[${spell.school}]</span>`);
-                this.terminal.writeLine(`     <span class="text-dim">${spell.castTime} | ${spell.range} | ${spell.duration}</span>`);
-                this.terminal.writeLine(`     <span class="text-dim">${spell.description}</span>`);
-            });
-        }
+            this.terminal.writeOption(1, 'Lanzar hechizo');
+            this.terminal.writeOption(2, 'Volver');
+            const action = await this.terminal.waitForChoice(1, 2);
 
-        this.terminal.writeBlank();
+            if (action === 2) {
+                viewing = false;
+            } else {
+                this.terminal.writeBlank();
+                this.terminal.writeNarrative('Elige el número del hechizo a lanzar (o 0 para cancelar):');
+                const spellIdx = await this.terminal.waitForChoice(0, allSpells.length);
+                if (spellIdx === 0) continue;
+
+                const spell = allSpells[spellIdx - 1];
+                const isLevel1 = char.knownSpells.includes(spell);
+
+                if (isLevel1 && currentSlots <= 0) {
+                    this.terminal.writeError('No te quedan espacios de conjuro de nivel 1.');
+                    await this.terminal.waitForChoice(1, 1);
+                    continue;
+                }
+
+                // Intentar lanzar el hechizo fuera de combate
+                const lowerName = spell.name.toLowerCase();
+                const canCastOut = ['luz', 'curar', 'sanar', 'prestidigitación', 'taumaturgia', 'ilusión'].some(kw => lowerName.includes(kw));
+
+                if (!canCastOut) {
+                    this.terminal.writeError('Ese hechizo no tiene un uso obvio fuera de combate ahora mismo.');
+                } else {
+                    this.terminal.writeLine(`<span class="text-magenta">✨ Conjuras ${spell.name}!</span>`);
+                    if (isLevel1) {
+                        char.currentSpellSlots[1]--;
+                    }
+                    
+                    if (lowerName.includes('curar') || lowerName.includes('sanar')) {
+                        const heal = DiceRoller.parse('1d8').total + char.getAbilityModifier(char.spellcastingAbility);
+                        char.heal(heal);
+                        this.terminal.writeSuccess(`La magia recorre tus venas. Curas ${heal} PG. PG: ${char.currentHP}/${char.maxHP}`);
+                    } else if (lowerName.includes('luz')) {
+                        this.activeLightSource = 'spell';
+                        this._updateVisionForScenario();
+                        this.terminal.writeSuccess('Una luz brillante ilumina los alrededores.');
+                    } else {
+                        this.terminal.writeSuccess(`Usas ${spell.name}. El entorno reacciona sutilmente a tu magia.`);
+                    }
+                }
+                
+                this.terminal.writeBlank();
+                this.terminal.writeOption(1, 'Continuar');
+                await this.terminal.waitForChoice(1, 1);
+            }
+        }
     }
 
     // ── MOVIMIENTO ───────────────────────────────
@@ -902,14 +1008,64 @@ export class GameEngine {
         this.terminal.writeLine(`<span class="text-red">⚔ ¡Encuentro hostil! ¡${enemy.name} te ataca!</span>`, 'combat');
         this.terminal.writeDivider('─', 35);
 
-        // Combate simple por turnos
         const char = this.state.character;
         let enemyHP = enemy.stats.hp;
         const enemyAC = enemy.stats.ac;
 
-        this.terminal.writeLine(`<span class="text-red">${enemy.name}</span> — PG: ${enemyHP} | CA: ${enemyAC}`);
-        this.terminal.writeHPBar(char.currentHP, char.maxHP);
-        this.terminal.writeBlank();
+        // --- Setup Combat UI ---
+        const mapDisplay = document.getElementById('map-display');
+        const mapLegend = document.getElementById('map-legend');
+        
+        const originalMapHtml = mapDisplay.innerHTML;
+        const originalLegendHtml = mapLegend.innerHTML;
+        
+        const enemyImgUrl = `https://placehold.co/200x200/333333/FFFFFF/png?text=${encodeURIComponent(enemy.name)}`;
+        
+        const classMap = { 'guerrero': 'fighter', 'mago': 'wizard', 'picaro': 'rogue', 'clerigo': 'cleric', 'bardo': 'bard', 'druida': 'druid', 'explorador': 'ranger', 'paladin': 'paladin', 'brujo': 'warlock', 'hechicero': 'sorcerer' };
+        const raceMap = { 'humano': 'human', 'elfo': 'elf', 'enano': 'dwarf', 'mediano': 'halfling', 'orco': 'orc', 'draconido': 'dragonborn', 'tiefling': 'tiefling' };
+        const playerClassEn = classMap[char.classId] || 'fighter';
+        const playerRaceEn = raceMap[char.raceId] || 'human';
+        const playerImgUrl = `./img/portraits/${playerRaceEn}_${playerClassEn}.png`;
+
+        mapDisplay.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-end; height:100%; padding: 40px; background: url('catacumbas1.jpeg') no-repeat center center; background-size: cover;">
+                <div style="text-align:center;">
+                    <img src="${enemyImgUrl}" style="width:150px; height:150px; border: 2px solid #cc0000; border-radius: 8px; object-fit: cover;" />
+                    <div style="margin-top:10px; font-weight:bold; color:#cc0000; background:rgba(0,0,0,0.5); padding:2px;">${enemy.name}</div>
+                </div>
+                <div style="text-align:center;">
+                    <img src="${playerImgUrl}" style="width:150px; height:150px; border: 2px solid #555; border-radius: 8px; object-fit: cover; transform: scaleX(-1);" />
+                    <div style="margin-top:10px; font-weight:bold; background:rgba(0,0,0,0.5); padding:2px;">${char.name}</div>
+                </div>
+            </div>
+        `;
+
+        const updateCombatInfo = () => {
+            mapLegend.innerHTML = `
+                <div class="legend-title" style="color: #ffaa00; border-bottom: 1px solid #ffaa00; margin-bottom: 10px;">🛡 INFO DE COMBATE</div>
+                <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                    <div style="margin-bottom:15px; flex: 1; min-width: 45%;">
+                        <div style="font-weight:bold; color:#00ff00;">${char.name}</div>
+                        <div>PG: ${char.currentHP} / ${char.maxHP}</div>
+                        <div>CA: ${char.armorClass}</div>
+                        ${char.maxSpellSlots > 0 ? `<div style="margin-top:5px; color:#00ffff;">Espacios: ${char.spellSlots} / ${char.maxSpellSlots}</div>` : ''}
+                    </div>
+                    <div style="flex: 1; min-width: 45%; text-align: right;">
+                        <div style="font-weight:bold; color:#ff3333;">${enemy.name}</div>
+                        <div>PG: ${Math.max(0, enemyHP)} / ${enemy.stats.hp}</div>
+                        <div>CA: ${enemyAC}</div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const waitForSpace = async () => {
+            this.terminal.writeLine('<span class="text-dim">[Presiona ESPACIO para continuar...]</span>');
+            await this.terminal.waitForKey([' ']);
+            this.terminal.writeBlank();
+        };
+
+        updateCombatInfo();
 
         while (enemyHP > 0 && char.currentHP > 0) {
             // Turno del jugador
@@ -919,83 +1075,152 @@ export class GameEngine {
             if (char.knownCantrips.length > 0 || char.knownSpells.length > 0) {
                 this.terminal.writeOption(3, '✨ Lanzar hechizo');
             }
+            this.terminal.writeOption(4, '📖 Acción Libre / Narrativa');
             this.terminal.writeBlank();
 
-            const maxChoice = (char.knownCantrips.length > 0 || char.knownSpells.length > 0) ? 3 : 2;
-            const action = await this.terminal.waitForChoice(1, maxChoice);
+            const action = await this.terminal.waitForChoice(1, 4);
 
             if (action === 2) {
                 // Huir
-                const dexCheck = DiceRoller.d20() + char.getAbilityModifier('DES');
-                if (dexCheck >= 12) {
+                const roll = DiceRoller.d20();
+                const total = roll + char.getAbilityModifier('DES');
+                await this.terminal.animateDiceRoll('Huida (DES)', DiceRoller.formatRoll('Huida', total, [roll], char.getAbilityModifier('DES')));
+                
+                if (total >= 12) {
                     this.terminal.writeSuccess('¡Logras escapar!');
                     this.state.addLog(`Huiste de ${enemy.name}.`, 'combat');
-                    // Move player back
                     char.x -= 1;
                     this.map.movePlayer(char.x, char.y);
-                    return;
+                    break;
                 } else {
                     this.terminal.writeError('¡No logras escapar!');
                 }
+                await waitForSpace();
             } else if (action === 1) {
-                // Atacar
+                // Atacar - Seleccionar arma
+                const weapons = char.inventory.filter(i => i.type === 'weapon');
+                if (weapons.length === 0) {
+                    weapons.push({ id: 'unarmed', name: 'Golpe Desarmado', damage: '1' });
+                }
+
+                this.terminal.writeLine('¿Con qué atacas?');
+                weapons.forEach((w, i) => this.terminal.writeOption(i + 1, w.name));
+                const wIdx = await this.terminal.waitForChoice(1, weapons.length);
+                const selectedWeapon = weapons[wIdx - 1];
+
                 const attackRoll = DiceRoller.d20();
-                const abilityMod = char.equippedWeapon ?
-                    char.getAbilityModifier('FUE') :
-                    char.getAbilityModifier('FUE');
+                const abilityMod = char.getAbilityModifier('FUE'); // Simplificación
                 const totalAttack = attackRoll + abilityMod + char.proficiencyBonus;
 
-                this.terminal.writeLine(DiceRoller.formatRoll('Ataque', totalAttack, [attackRoll], abilityMod + char.proficiencyBonus));
+                const attackStr = DiceRoller.formatRoll('Ataque', totalAttack, [attackRoll], abilityMod + char.proficiencyBonus);
+                await this.terminal.animateDiceRoll('Tirada de Ataque', attackStr);
+                await waitForSpace();
 
-                if (attackRoll === 20) {
-                    // Crítico
-                    const dmg = DiceRoller.parse('2d8');
-                    const totalDmg = dmg.total + abilityMod;
-                    this.terminal.writeLine(`<span class="text-yellow">¡¡GOLPE CRÍTICO!! ${totalDmg} de daño</span>`, 'combat');
-                    enemyHP -= totalDmg;
-                } else if (totalAttack >= enemyAC) {
-                    const dmg = DiceRoller.parse('1d8');
-                    const totalDmg = dmg.total + abilityMod;
-                    this.terminal.writeLine(`<span class="text-green">¡Impactas! ${totalDmg} de daño</span>`, 'combat');
+                if (attackRoll === 20 || totalAttack >= enemyAC) {
+                    let dmgExpr = selectedWeapon.damage || '1d4';
+                    if (attackRoll === 20 && dmgExpr.includes('d')) {
+                        const parts = dmgExpr.split('d');
+                        dmgExpr = `${parseInt(parts[0])*2}d${parts[1]}`;
+                        this.terminal.writeLine(`<span class="text-yellow">¡¡GOLPE CRÍTICO!!</span>`, 'combat');
+                    }
+                    const dmgRoll = DiceRoller.parse(dmgExpr);
+                    const totalDmg = dmgRoll.total + abilityMod;
+                    
+                    const dmgStr = DiceRoller.formatRoll('Daño', totalDmg, dmgRoll.rolls, abilityMod);
+                    await this.terminal.animateDiceRoll('Tirada de Daño', dmgStr);
+                    
+                    this.terminal.writeLine(`<span class="text-green">¡Impactas a ${enemy.name} por ${totalDmg} de daño!</span>`, 'combat');
                     enemyHP -= totalDmg;
                 } else {
-                    this.terminal.writeLine(`<span class="text-red">Fallas el ataque. (${totalAttack} vs CA ${enemyAC})</span>`);
+                    this.terminal.writeLine(`<span class="text-red">Fallas el ataque.</span>`);
                 }
+                updateCombatInfo();
+                await waitForSpace();
+
             } else if (action === 3) {
-                // Hechizo simple (usa cantrip de daño si tiene)
-                const damageCantrips = char.knownCantrips.filter(s =>
-                    s.description.includes('d6') || s.description.includes('d8') || s.description.includes('d10') || s.description.includes('d12')
-                );
-                if (damageCantrips.length > 0) {
-                    const spell = damageCantrips[0];
+                // Hechizo
+                const combatSpells = [...char.knownCantrips, ...char.knownSpells];
+                if (combatSpells.length === 0) {
+                    this.terminal.writeError('No tienes hechizos disponibles.');
+                    await waitForSpace();
+                    continue; 
+                }
+
+                this.terminal.writeLine('¿Qué hechizo lanzas?');
+                combatSpells.forEach((s, i) => {
+                    let levelLabel = s.level === 0 ? ' (Cantrip)' : ' (Nivel 1 - Consume 1 Espacio)';
+                    let fxLabel = s.damage ? ` [${s.damage} daño]` : (s.healing ? ` [${s.healing} cura]` : ' [Efecto]');
+                    this.terminal.writeOption(i + 1, `${s.name}${fxLabel}${levelLabel}`);
+                });
+                const sIdx = await this.terminal.waitForChoice(1, combatSpells.length);
+                const baseSpell = combatSpells[sIdx - 1];
+                const spell = getSpellById(baseSpell.id) || baseSpell;
+
+                if (spell.level > 0) {
+                    if (char.spellSlots <= 0) {
+                        this.terminal.writeError('No tienes espacios de hechizo disponibles.');
+                        await waitForSpace();
+                        continue;
+                    }
+                    char.spellSlots--;
+                    updateCombatInfo();
+                }
+
+                this.terminal.writeLine(`<span class="text-magenta">✨ Invocas ${spell.name}!</span>`);
+
+                if (spell.damage) {
                     const attackRoll = DiceRoller.d20();
                     const totalAttack = attackRoll + char.spellAttackBonus;
 
-                    this.terminal.writeLine(`<span class="text-magenta">✨ Lanzas ${spell.name}!</span>`);
-                    this.terminal.writeLine(DiceRoller.formatRoll('Ataque mágico', totalAttack, [attackRoll], char.spellAttackBonus));
+                    const attackStr = DiceRoller.formatRoll('Ataque mágico', totalAttack, [attackRoll], char.spellAttackBonus);
+                    await this.terminal.animateDiceRoll('Ataque Mágico', attackStr);
+                    await waitForSpace();
 
                     if (totalAttack >= enemyAC || attackRoll === 20) {
-                        const dmg = DiceRoller.parse('1d10');
-                        const totalDmg = attackRoll === 20 ? dmg.total * 2 : dmg.total;
-                        this.terminal.writeLine(`<span class="text-magenta">¡Impactas con magia! ${totalDmg} de daño</span>`, 'combat');
-                        enemyHP -= totalDmg;
+                        let dmgExpr = spell.damage;
+                        if (attackRoll === 20) {
+                            const parts = dmgExpr.split('d');
+                            dmgExpr = `${parseInt(parts[0])*2}d${parts[1]}`;
+                            this.terminal.writeLine(`<span class="text-yellow">¡¡CRÍTICO MÁGICO!!</span>`);
+                        }
+                        const dmgRoll = DiceRoller.parse(dmgExpr);
+                        const dmgStr = DiceRoller.formatRoll('Daño', dmgRoll.total, dmgRoll.rolls, 0);
+                        await this.terminal.animateDiceRoll('Daño Mágico', dmgStr);
+
+                        this.terminal.writeLine(`<span class="text-magenta">¡El hechizo golpea por ${dmgRoll.total} de daño!</span>`, 'combat');
+                        enemyHP -= dmgRoll.total;
                     } else {
                         this.terminal.writeLine(`<span class="text-red">El hechizo falla.</span>`);
                     }
+                } else if (spell.healing) {
+                    const healRoll = DiceRoller.parse(spell.healing);
+                    await this.terminal.animateDiceRoll('Curación Mágica', DiceRoller.formatRoll('Curación', healRoll.total, healRoll.rolls, 0));
+                    char.heal(healRoll.total);
+                    this.terminal.writeSuccess(`Recuperas ${healRoll.total} PG. (PG actuales: ${char.currentHP})`);
                 } else {
-                    this.terminal.writeError('No tienes hechizos de daño disponibles. Atacas normalmente.');
-                    // Fall through to melee
-                    const attackRoll = DiceRoller.d20();
-                    const abilityMod = char.getAbilityModifier('FUE');
-                    const totalAttack = attackRoll + abilityMod + char.proficiencyBonus;
-                    if (totalAttack >= enemyAC) {
-                        const dmg = DiceRoller.parse('1d8');
-                        enemyHP -= dmg.total + abilityMod;
-                        this.terminal.writeLine(`<span class="text-green">¡Impactas! ${dmg.total + abilityMod} de daño</span>`);
-                    } else {
-                        this.terminal.writeLine(`<span class="text-red">Fallas.</span>`);
-                    }
+                    this.terminal.writeLine(`<span class="text-cyan">${spell.description}</span>`);
+                    this.terminal.writeLine(`<span class="text-dim">[ Efecto táctico/narrativo aplicado. ]</span>`);
                 }
+
+                updateCombatInfo();
+                await waitForSpace();
+
+            } else if (action === 4) {
+                // Acción libre
+                this.terminal.writeNarrative('Describe qué quieres hacer (ej. "le tiro arena a los ojos"):');
+                const text = await this.terminal.waitForInput('text');
+                this.terminal.writeLine(`<span class="text-cyan">Tú intentas: "${text}"</span>`);
+                this.terminal.writeLine(`<span class="text-dim">[ La IA procesará esto pronto. Por ahora, asombrosamente, funciona y el DM queda perplejo. ]</span>`);
+                
+                // Efecto "dummy" positivo
+                const roll = DiceRoller.d20();
+                await this.terminal.animateDiceRoll('Suerte (DM)', DiceRoller.formatRoll('Suerte', roll, [roll], 0));
+                if (roll >= 10) {
+                    this.terminal.writeSuccess('¡Tu artimaña distrae al enemigo! Ganas ventaja en el próximo turno.');
+                } else {
+                    this.terminal.writeError('El enemigo no se deja engañar por tu táctica.');
+                }
+                await waitForSpace();
             }
 
             // Turno del enemigo (si sigue vivo)
@@ -1003,22 +1228,34 @@ export class GameEngine {
                 this.terminal.writeBlank();
                 this.terminal.writeSystem(`Turno de ${enemy.name}:`);
                 const enemyAttack = DiceRoller.d20() + 4;
-                this.terminal.writeLine(DiceRoller.formatRoll('Ataque enemigo', enemyAttack, [enemyAttack - 4], 4));
+                const eAttackStr = DiceRoller.formatRoll('Ataque enemigo', enemyAttack, [enemyAttack - 4], 4);
+                await this.terminal.animateDiceRoll('Enemigo Ataca', eAttackStr);
+                await waitForSpace();
 
                 if (enemyAttack >= char.armorClass) {
                     const dmg = DiceRoller.parse('1d6');
                     const totalDmg = dmg.total + 2;
+                    const eDmgStr = DiceRoller.formatRoll('Daño enemigo', totalDmg, dmg.rolls, 2);
+                    await this.terminal.animateDiceRoll('Enemigo Daña', eDmgStr);
+                    
                     char.takeDamage(totalDmg);
                     this.terminal.writeLine(`<span class="text-red">¡${enemy.name} te golpea por ${totalDmg} de daño!</span>`, 'combat');
                 } else {
                     this.terminal.writeLine(`<span class="text-green">${enemy.name} falla su ataque.</span>`);
                 }
-
-                this.terminal.writeBlank();
-                this.terminal.writeLine(`<span class="text-red">${enemy.name}: ${Math.max(0, enemyHP)} PG</span>`);
-                this.terminal.writeHPBar(char.currentHP, char.maxHP);
+                
+                updateCombatInfo();
+                await waitForSpace();
             }
         }
+
+        // Restore map UI
+        mapDisplay.innerHTML = originalMapHtml;
+        mapLegend.innerHTML = originalLegendHtml;
+        
+        // Re-render map completely in case UI needs refreshing
+        this.map.mapEl = document.getElementById('map-ascii');
+        this.map.render();
 
         if (enemyHP <= 0) {
             this.terminal.writeBlank();
@@ -1036,6 +1273,11 @@ export class GameEngine {
             this.terminal.writeLine('<span class="text-red">  ☠ HAS CAÍDO EN COMBATE ☠</span>');
             this.terminal.writeLine('<span class="text-red">═══════════════════════════</span>');
             this.state.setPhase(GAME_PHASES.GAME_OVER);
+            this.terminal.writeBlank();
+            this.terminal.writeOption(1, 'Crear nuevo personaje');
+            await this.terminal.waitForChoice(1, 1);
+            localStorage.removeItem('eregepeia_character');
+            location.reload();
         }
     }
 

@@ -125,6 +125,35 @@ export class Terminal {
     }
 
     /**
+     * Anima un dado girando
+     * @param {string} label
+     * @param {string} finalResultStr
+     * @param {number} durationMs
+     */
+    animateDiceRoll(label, finalResultStr, durationMs = 800) {
+        const line = document.createElement('div');
+        line.className = 'terminal-line text-yellow fade-in';
+        this.outputEl.appendChild(line);
+        this._scrollToBottom();
+
+        return new Promise(resolve => {
+            let elapsed = 0;
+            const interval = 50;
+            const timer = setInterval(() => {
+                elapsed += interval;
+                if (elapsed >= durationMs) {
+                    clearInterval(timer);
+                    line.innerHTML = finalResultStr;
+                    resolve();
+                } else {
+                    const randomVal = Math.floor(Math.random() * 20) + 1;
+                    line.innerHTML = `🎲 ${label}: girando... [${randomVal}]`;
+                }
+            }, interval);
+        });
+    }
+
+    /**
      * Escribe un subtítulo
      */
     writeSubtitle(text) {
